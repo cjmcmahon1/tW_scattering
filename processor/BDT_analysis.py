@@ -263,6 +263,16 @@ def BDT_train_test_split(full_data, verbose=True):
     return data_train, data_test
 
 def gen_BDT(signal_name, data_train, data_test, param, num_trees, output_dir, booster_name="", flag_load=False, verbose=True, flag_save_booster=True):
+    if booster_name == "":
+        booster_path = output_dir + "booster_{}.model".format(signal_name)
+    else:
+        booster_path = output_dir + "booster_{}.model".format(booster_name)
+        
+    if flag_load:
+        print("Loading saved model...")
+        booster = xgb.Booster({"nthread": 4})  # init model xgb.Booster()
+        booster.load_model(booster_path)  # load data
+        
     feature_names = train_features#data_train.columns[:-2]  #full_data
     train_weights = data_train.Weight
     test_weights = data_test.Weight
@@ -272,19 +282,13 @@ def gen_BDT(signal_name, data_train, data_test, param, num_trees, output_dir, bo
     test = xgb.DMatrix(data=data_test[feature_names],label=data_test.Label.cat.codes,
                        missing=-999.0,feature_names=feature_names, weight=np.abs(test_weights))
     evals_result = {}
-    if booster_name == "":
-        booster_path = output_dir + "booster_{}.model".format(signal_name)
-    else:
-        booster_path = output_dir + "booster_{}.model".format(booster_name)
+
     if verbose:
         print(feature_names)
         print(data_test.Label.cat.codes)
         print("weights:\n")
         print(train_weights)
-    if flag_load:
-        print("Loading saved model...")
-        booster = xgb.Booster({"nthread": 4})  # init model xgb.Booster()
-        booster.load_model(booster_path)  # load data
+
 
     else:
         if verbose:
@@ -723,9 +727,9 @@ class BDT:
             back_test_weights = self.test_Dmatrix.get_weight()[~(self.test_Dmatrix.get_label().astype(bool))]
             plt.figure("sig/back", figsize=(7,7))
             hist_sig_train = Hist1D(sig_train_predictions, bins=bins, weights=sig_train_weights, color="midnightblue", label="signal (train)")
-            hist_sig_test = Hist1D(sig_test_predictions, bins=bins, weights=sig_test_weights, color="midnightblue", label="signal (test)")
+            hist_sig_test = Hist1D(sig_test_predictions, bins=bins, weights=sig_test_weights, color="blue", label="signal (test)")
             hist_back_train = Hist1D(back_train_predictions, bins=bins, weights=back_train_weights, color="firebrick", label="background (train)")
-            hist_back_test = Hist1D(back_test_predictions, bins=bins, weights=back_test_weights, color="firebrick", label="background (test)")
+            hist_back_test = Hist1D(back_test_predictions, bins=bins, weights=back_test_weights, color="red", label="background (test)")
             hist_sig_train.plot(ax=plt.gca(), errors=True)
             hist_sig_test.plot(ax=plt.gca(), errors=True)
             hist_back_train.plot(ax=plt.gca(), errors=True)
@@ -1202,6 +1206,17 @@ class BDT:
         qt.fit(signal_predictions.reshape(-1, 1))
         transformed_bins = qt.inverse_transform(bins.reshape(-1, 1))
         return transformed_bins[:,0]
+    
+    def make_BDT_test_csv(self, test_file, output_dir):
+        output_dir = "{0}/{1}/{2}/".format(self.out_base_dir, self.label, self.booster_label)
+        #booster = xgb.Booster() # init model
+        #self.booster.load_model(booster_path) # load data
+        test_df = pd.read_csv(test_file)
+        results = self.booster.predict(BDT_analysis.make_dmatrix(test_df, BDT_features))
+        test_df["result"] = results
+        test_df = test_df.drop(labels=["Weight", "Label", "Category"], axis=1)
+        test_df.to_csv("{}/python_test_results_{}.csv".format(output_dir, self.label), index=False)
+        print(results)
     
     def gen_datacard(self, signal_name, year, directories, quantile_transform=True, data_driven=False, plot=True, BDT_bins=np.linspace(0, 1, 21),
                      flag_tmp_directory=False, dir_label="tmp", from_pandas=False, systematics=False, JES_dirs=(), flag_plot=False):

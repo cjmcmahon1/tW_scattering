@@ -34,14 +34,14 @@ BDT_features = ["Most_Forward_pt",
               "LeadBtag_score",
               "Weight"]
 
-def make_BDT_test_csv(booster_path):
+def make_BDT_test_csv(booster_path, label="HCT"):
         booster = xgb.Booster() # init model
         booster.load_model(booster_path)  # load data
         test_df = pd.read_csv("test_events.csv")
         results = booster.predict(BDT_analysis.make_dmatrix(test_df, BDT_features))
         test_df["result"] = results
         test_df = test_df.drop(labels=["Weight", "Label", "Category"], axis=1)
-        test_df.to_csv("python_test_results.csv", index=False)
+        test_df.to_csv("python_test_results_{}.csv".format(label), index=False)
         print(results)
         
 make_BDT_test_csv("booster_HCT.model")
