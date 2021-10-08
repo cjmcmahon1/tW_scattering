@@ -42,7 +42,7 @@ import time
 from yahist import Hist1D
 
 import Tools.objects
-from Tools.nano_mapping import make_fileset, nano_mapping
+#from Tools.nano_mapping import make_fileset, nano_mapping
 from processor.meta_processor import get_sample_meta
 from plots.helpers import makePlot, scale_and_merge
 from sklearn.metrics import auc, roc_auc_score, roc_curve
@@ -87,6 +87,7 @@ bins_dict = { "Most_Forward_pt":np.linspace(10,200,30),
               "SubLeadJet_CtagScore":np.linspace(0, 1, 10),
               "SubSubLeadJet_CtagScore":np.linspace(0, 1, 10)
             }
+
 tex_dict =  { "Most_Forward_pt":r'Most Forward $p_T$',
               "HT":r'$H_T$',
               "LeadLep_eta":r'Leading Lepton $\left|\eta\right|$',
@@ -262,7 +263,7 @@ def BDT_train_test_split(full_data, verbose=True):
         
     return data_train, data_test
 
-def gen_BDT(signal_name, data_train, data_test, param, num_trees, output_dir, booster_name="", flag_load=False, verbose=True, flag_save_booster=True):
+def gen_BDT(signal_name, param, num_trees, output_dir, booster_name="", data_train=None, data_test=None, flag_load=False, verbose=True, flag_save_booster=True):
     if booster_name == "":
         booster_path = output_dir + "booster_{}.model".format(signal_name)
     else:
@@ -272,7 +273,10 @@ def gen_BDT(signal_name, data_train, data_test, param, num_trees, output_dir, bo
         print("Loading saved model...")
         booster = xgb.Booster({"nthread": 4})  # init model xgb.Booster()
         booster.load_model(booster_path)  # load data
+        data_train = pd.read_csv(output_dir + "data_train.csv")
+        data_test = pd.read_csv(output_dir + "data_test.csv")
         
+    assert (data_train != None and data_test != None)
     feature_names = train_features#data_train.columns[:-2]  #full_data
     train_weights = data_train.Weight
     test_weights = data_test.Weight
@@ -289,7 +293,6 @@ def gen_BDT(signal_name, data_train, data_test, param, num_trees, output_dir, bo
         print("weights:\n")
         print(train_weights)
 
-
     else:
         if verbose:
             print("Training new model...")
@@ -301,10 +304,9 @@ def gen_BDT(signal_name, data_train, data_test, param, num_trees, output_dir, bo
     #if the tree is of interest, we can save it
     if flag_save_booster:
         booster.save_model(booster_path)
-#         f = open(output_dir + "booster_{}_dump.txt".format(signal_name), "w")
-#         dump = booster.get_dump()
-#         f.writelines(dump)
-#         f.close()
+        data_train.to_csv(output_dir + "data_train.csv")
+        data_test.to_csv(output_dir + "data_test.csv")
+
     return booster, train, test, evals_result
 
 def optimize_BDT_params(data_train, n_iter=20, num_folds=3, param_grid={}):
@@ -576,7 +578,8 @@ class BDT:
         full_data = pd.concat([signal_BDT_params, background_BDT_params], axis=0)
         return signal_BDT_params, background_BDT_params, full_data
             
-    def load_SR_BR_from_babies(self, baby_files=glob.glob("/home/users/cmcmahon/fcnc/ana/analysis/helpers/BDT/babies/2018/dilep/*.root")): 
+    def load_SR_BR_from_babies(self, baby_files): 
+        #breakpoint()
         signal_BDT_params = pd.DataFrame()
         background_BDT_params = pd.DataFrame()
         for file in baby_files:
@@ -693,8 +696,8 @@ class BDT:
         #NEED TO FIX ERRORS WHEN NORMALIZING (to accomodate different sized train/test sets)
         if region == "signal" or region == "background":
             fig, ax = plt.subplots(2, 1, sharex=True, figsize=(8,8), gridspec_kw=dict(height_ratios=[3, 1]))
-            hist_train = ax[0].hist(train_set_predictions, bins=bins, histtype='step',color='lime',label='training {}'.format(region), weights=train_weights)#, density=True)
-            hist_test  = ax[0].hist(test_set_predictions,  bins=bins, histtype='step',color='magenta'     ,label='test {}'.format(region), weights=test_weights)#, density=True)
+            hist_train = ax[0].hist(train_set_predictions, bins=bins, histtype='step',color='lime', label='training {}'.format(region), weights=train_weights)#, density=True)
+            hist_test  = ax[0].hist(test_set_predictions,  bins=bins, histtype='step',color='magenta', label='test {}'.format(region), weights=test_weights)#, density=True)
             yahist_train = make_yahist(hist_train)
             yahist_test = make_yahist(hist_test)
             ratio = yahist_train.divide(yahist_test)
@@ -838,7 +841,6 @@ class BDT:
         train_FPR = train_FP / (train_FP + train_TN)
         train_AUC = auc(train_FPR, train_TPR)
         plt.plot(train_FPR, train_TPR, '-', color='lime', label = "Training Set (Area = {0:.3f})".format(train_AUC))
-
         test_TPR = test_TP / (test_TP + test_FN)
         test_FPR = test_FP / (test_FP + test_TN)
         test_AUC = auc(test_FPR, test_TPR)
@@ -847,7 +849,6 @@ class BDT:
         # make the plot readable
         plt.xlabel('False Positive Rate (Background Efficiency)',fontsize=12);
         plt.ylabel('True Positive Rate (Signal Efficiency)',fontsize=12);
-        #plt.ylim([0, 1])
         plt.legend(frameon=False);
         if savefig:
             plt.savefig(out_dir + "TPR_FPR.pdf")
@@ -882,7 +883,6 @@ class BDT:
         plt.xlabel("Training Rounds (num_trees)")
         plt.ylabel("Log Loss")
         plt.title("{} Log Loss Plot".format(self.label))
-        #plt.yscale("log")
         if savefig:
             plt.savefig(out_dir + "Logloss.pdf")
             plt.savefig(out_dir + "Logloss.png")
@@ -1136,7 +1136,7 @@ class BDT:
             tmp_weights /= 100.
         if len(tmp_weights) > 0:
             if quantile_transformer==None:
-                predictions = cat_dict[category]["prediction"] ##fix the prediction
+                predictions = cat_dict[category]["prediction"] 
             else:
                 predictions = quantile_transformer.transform(cat_dict[category]["prediction"].reshape(-1, 1)).flatten()
             digitized_prediction = np.digitize(predictions, bins)
@@ -1152,7 +1152,7 @@ class BDT:
     def get_bin_CRStats(self, bins, bin_idx, cat_dict, quantile_transformer=None):
         weights = cat_dict["fakes"]["data"].Weight.copy()
         if quantile_transformer==None:
-            predictions = cat_dict["fakes"]["prediction"] ##fix the prediction
+            predictions = cat_dict["fakes"]["prediction"]
         else:
             predictions = quantile_transformer.transform(cat_dict["fakes"]["prediction"].reshape(-1, 1)).flatten()
         digitized_prediction = np.digitize(predictions, bins)
@@ -1160,7 +1160,7 @@ class BDT:
         tmp_counts = np.sum((digitized_prediction==bin_idx))
         return tmp_yield, tmp_counts
     
-    def get_bin_systematic_yield(self, category, systematic, bins, bin_idx, cat_dict, quantile_transformer=None, JES_cds=()): #ADD JES special case
+    def get_bin_systematic_yield(self, category, systematic, bins, bin_idx, cat_dict, quantile_transformer=None, JES_cds=()): 
         if (systematic=="JES") and (len(JES_cds)==2):
             weights_up = JES_cds[0][category]["data"]["Weight"].copy()
             weights_down = JES_cds[1][category]["data"]["Weight"].copy()
@@ -1405,266 +1405,3 @@ def compare_S_B_ratio(BDTs, directories="", fill_categories=True):
     plt.ylabel("Ratio")
     plt.legend()
     plt.draw()
-
-    
-#Old code when we were doing preselections in coffea
-class nano_analysis(processor.ProcessorABC):
-    def __init__(self, year=2018, variations=[], accumulator={}, debug=False, BDT_features=[], version= "fcnc_v6_SRonly_5may2021", SS_region="SS", ):
-        self.variations = variations
-        self.year = year
-        self.debug = debug
-        self.btagSF = btag_scalefactor(year)
-        self._accumulator = processor.dict_accumulator(accumulator)
-        self.BDT_features = BDT_features
-        self.version=version
-        self.SS_region=SS_region
-
-    @property
-    def accumulator(self):
-        return self._accumulator  
-  
-    # we will receive a NanoEvents instead of a coffea DataFrame. The processor below is no longer used.
-    def process(self, events):
-
-        events = events[ak.num(events.Jet)>0] #corrects for rare case where there isn't a single jet 
-        output = self.accumulator.identity()
-        
-        # we can use a very loose preselection to filter the events. nothing is done with this presel, though
-        presel = ak.num(events.Jet)>=2
-        
-        ev = events[presel]
-        ##Jets
-        Jets = events.Jet
-        
-        ## MET -> can switch to puppi MET
-        met_pt  = ev.MET.pt
-        met_phi = ev.MET.phi
-    
-         ### For FCNC, we want electron -> tightTTH
-        ele_t = Collections(ev, "Electron", "tightFCNC", year=self.year).get()
-        ele_l = Collections(ev, "Electron", "fakeableFCNC", year=self.year).get()    
-        mu_t  = Collections(ev, "Muon", "tightFCNC", year=self.year).get()
-        mu_l  = Collections(ev, "Muon", "fakeableFCNC", year=self.year).get()
-        
-        dataset = ev.metadata["dataset"]
-        rares_dataset = ['ttw', 'www', 'wzz', 'wz', 'tg', 'wzg', 'tth_nobb', 'ttg_dilep', 'tttj', 'tttt', 'tttw', 
-                         'tthh', 'vh_nobb', 'tzq', 'ttwh', 'ttg_1lep', 'wwz', 'wwg', 'ttwz', 'zz', 'ttww', 'wg', 
-                         'ttz_m10', 'qqww', 'zzz', 'ggh', 'ttzh', 'ttz_m1-10', 'tw_dilep', 'ttzz']
-        
-        flips_dataset = ["dyjets_m10-50", "dyjets_m50", "zg", "tw_dilep"]#, "ww"]
-        if dataset in rares_dataset:
-            ele_t = ele_t[((ele_t.genPartFlav==1)|(ele_t.genPartFlav==15))]
-            ele_l = ele_l[((ele_l.genPartFlav==1)|(ele_l.genPartFlav==15))]
-            mu_t = mu_t[((mu_t.genPartFlav==1)|(mu_t.genPartFlav==15))]
-            mu_l = mu_l[((mu_l.genPartFlav==1)|(mu_l.genPartFlav==15))]
-        
-        #SS preselection 
-        lepton  = ak.concatenate([mu_l, ele_l], axis=1)
-        tight_lepton  = ak.concatenate([mu_t, ele_t], axis=1)
-        sorted_index_nofilter = ak.argsort(tight_lepton.pt, axis=-1, ascending=False)
-        sorted_lep_nofilter = tight_lepton[sorted_index_nofilter]
-        leadlep_nofilter = sorted_lep_nofilter[:,0:1]
-        subleadlep_nofilter = sorted_lep_nofilter[:,1:2]
-        
-        #M(ee) > 12
-        diele_mass = choose(ele_t, 2).mass
-
-        #clean jets :
-        # we want at least two jets that are outside of the lepton jets by deltaR > 0.4
-        jets = getJets(ev, maxEta=2.4, minPt=40, pt_var='pt')
-        jets_for_btag = getJets(ev, maxEta=2.5, minPt=25, pt_var='pt')
-        #jet_sel = (ak.num(jets[~(match(jets, ele_l, deltaRCut=0.4) | match(jets, mu_l, deltaRCut=0.4))])>=2)
-        btag = getBTagsDeepFlavB(jets_for_btag, year=self.year)
-        
-        selection = PackedSelection()
-        selection.add("njets", (ak.num(jets[~(match(jets, tight_lepton, deltaRCut=0.4))]) >= 2))
-        selection.add("nlep", (ak.num(lepton, axis=1) == 2))
-        selection.add("nlep_tight", (ak.num(tight_lepton, axis=1) == 2))
-        selection.add("SS", (ak.sum(ak.concatenate([leadlep_nofilter.charge, subleadlep_nofilter.charge], axis=1), axis=1) != 0))
-        selection.add("nBtag", (ak.num(btag, axis=1) >= 0))
-        selection.add("M(ee)>12", ((ak.num(ele_t) < 2) | (ak.sum(diele_mass, axis=1) > 12.0))) #ak.sum here to flatten the diele_mass array
-        selection_reqs = ["njets", "nBtag", "nlep", "SS", "nlep_tight", "M(ee)>12"]
-        
-        if dataset in flips_dataset:
-            flip_evts = ((ak.sum(ev.GenPart.pdgId[ele_t.genPartIdx]==((-1)*ele_t.pdgId), axis=1) == 1))
-            selection.add("flip", flip_evts)
-            selection_reqs += ["flip"]
-        
-        fcnc_reqs_d = { sel: True for sel in selection_reqs}
-        FCNC_sel = selection.require(**fcnc_reqs_d)
-
-        #sorting
-        sorted_index = ak.argsort(lepton[FCNC_sel].pt, axis=-1, ascending=False)
-        sorted_pt = lepton[FCNC_sel].pt[sorted_index]
-        sorted_eta = lepton[FCNC_sel].eta[sorted_index]
-        sorted_phi = lepton[FCNC_sel].phi[sorted_index]
-        sorted_dxy = lepton[FCNC_sel].dxy[sorted_index]
-        sorted_dz = lepton[FCNC_sel].dz[sorted_index]
-
-        if (np.array(ak.num(jets[FCNC_sel])).any()==1): #if there is at least one event with a jet
-            sorted_jet_index = ak.argsort(jets[FCNC_sel].pt, axis=-1, ascending=False)
-            sorted_jet_pt = jets[FCNC_sel].pt[sorted_jet_index]
-            #njets
-            njets = ak.num(jets, axis=1)[FCNC_sel]
-            most_forward_pt = ak.flatten(jets[FCNC_sel].pt[ak.singletons(ak.argmax(abs(jets[FCNC_sel].eta), axis=1))])
-            leadjet_pt = ak.flatten(sorted_jet_pt[:,0:1])
-            subleadjet_pt = ak.flatten(sorted_jet_pt[:,1:2])
-            #this sometimes is not defined, so ak.firsts relpaces the empty arrays with None, then we can set all None to zero
-            subsubleadjet_pt = ak.fill_none(ak.firsts(sorted_jet_pt[:,2:3]), 0)
-        else: #if there are no events with jets
-            njets = np.zeros_like(FCNC_sel[FCNC_sel])
-            most_forward_pt = np.zeros_like(FCNC_sel[FCNC_sel])
-            leadjet_pt = np.zeros_like(FCNC_sel[FCNC_sel])
-            subleadjet_pt = np.zeros_like(FCNC_sel[FCNC_sel])
-            subsubleadjet_pt = np.zeros_like(FCNC_sel[FCNC_sel])
-
-        if (np.array(ak.num(btag[FCNC_sel])).any()==1): #if there is at least one event with a btag
-            sorted_btag_index = ak.argsort(btag[FCNC_sel].pt, axis=-1, ascending=False)
-            sorted_btag_pt = btag[FCNC_sel].pt[sorted_btag_index]
-            #btags
-            nbtag = ak.num(btag)[FCNC_sel]
-            leadbtag_pt = sorted_btag_pt[:,0:1] #this sometimes is not defined (some of the arrays are empty)
-            # ak.firsts() relpaces the empty arrays with None, then we can set all None to zero
-            leadbtag_pt = ak.fill_none(ak.firsts(leadbtag_pt), 0)    
-        else:
-            nbtag = np.zeros_like(FCNC_sel[FCNC_sel])
-            leadbtag_pt = np.zeros_like(FCNC_sel[FCNC_sel])
-        
-        leadlep_pt = ak.flatten(sorted_pt[:,0:1])
-        subleadlep_pt = ak.flatten(sorted_pt[:,1:2])
-        leadlep_eta = ak.flatten(sorted_eta[:,0:1])
-        subleadlep_eta = ak.flatten(sorted_eta[:,1:2])
-        leadlep_phi = ak.flatten(sorted_phi[:,0:1])
-        subleadlep_phi = ak.flatten(sorted_phi[:,1:2])
-        leadlep_dxy = ak.flatten(sorted_dxy[:,0:1])
-        subleadlep_dxy = ak.flatten(sorted_dxy[:,1:2])    
-        leadlep_dz = ak.flatten(sorted_dz[:,0:1])
-        subleadlep_dz = ak.flatten(sorted_dz[:,1:2])
-        
-        sorted_lep = lepton[FCNC_sel][sorted_index]
-        leadlep = sorted_lep[:,0:1]
-        subleadlep = sorted_lep[:,1:2]
-        nelectron = ak.num(ele_l[FCNC_sel], axis=1)
-        MET_pt = ev[FCNC_sel].MET.pt
-        MET_phi = ev[FCNC_sel].MET.phi
-        #HT
-        ht = ak.sum(jets.pt, axis=1)[FCNC_sel]
-        
-        if (np.array(ak.num(leadlep)).any()==1) and (np.array(ak.num(subleadlep)).any()==1):
-            leadlep_subleadlep_mass = ak.flatten((leadlep + subleadlep).mass)
-            #MT of lead and subleading lepton with ptmiss (MET)
-            mt_leadlep_met = mt(leadlep_pt, leadlep_phi, MET_pt, MET_phi)
-            mt_subleadlep_met = mt(subleadlep_pt, subleadlep_phi, MET_pt, MET_phi)
-        else:
-            leadlep_subleadlep_mass = np.zeros_like(FCNC_sel[FCNC_sel])
-            mt_leadlep_met = np.zeros_like(FCNC_sel[FCNC_sel])
-            mt_subleadlep_met = np.zeros_like(FCNC_sel[FCNC_sel])
-        
-        #get weights of events (scale1fb * generator_weights * lumi)
-        weight = production.weights.get_weight(ev.metadata["dataset"], self.year, self.version) #scale1fb
-        weight = weight * (ev.Generator.weight / abs(ev.Generator.weight)) #generator weights (can sometimes be negative)
-        lumi_dict = {2018:59.71, 2017:41.5, 2016:35.9} #lumi weights
-        weight = weight * lumi_dict[self.year]
-        weight = weight[FCNC_sel]
-        
-        if len(FCNC_sel[FCNC_sel]) > 0:
-            BDT_param_dict = {"Most_Forward_pt":most_forward_pt,
-                              "HT":ht,
-                              "LeadLep_eta":np.abs(leadlep_eta),
-                              "MET_pt":MET_pt,
-                              "LeadLep_pt":leadlep_pt,
-                              "LeadLep_dxy":np.abs(leadlep_dxy),
-                              "LeadLep_dz":np.abs(leadlep_dz),
-                              "SubLeadLep_pt":subleadlep_pt,
-                              "SubLeadLep_eta":np.abs(subleadlep_eta),
-                              "SubLeadLep_dxy":np.abs(subleadlep_dxy),
-                              "SubLeadLep_dz":np.abs(subleadlep_dz),
-                              "nJets":njets,
-                              "nBtag":nbtag,
-                              "LeadJet_pt":leadjet_pt,
-                              "SubLeadJet_pt":subleadjet_pt,
-                              "SubSubLeadJet_pt":subsubleadjet_pt,
-                              "nElectron":nelectron,
-                              "MET_pt":MET_pt,
-                              "LeadBtag_pt":leadbtag_pt,
-                              "MT_LeadLep_MET":mt_leadlep_met,
-                              "MT_SubLeadLep_MET":mt_leadlep_met,
-                              "LeadLep_SubLeadLep_Mass":leadlep_subleadlep_mass,
-                              "Weight":weight
-                              }
-            #create pandas dataframe
-            passed_events = ev[FCNC_sel]
-            event_p = ak.to_pandas(passed_events[["event"]])
-            for param in self.BDT_features:
-                event_p[param] = BDT_param_dict[param]
-            output['BDT_df'] += processor.column_accumulator(event_p.to_numpy())
-        return output
-
-    def postprocess(self, accumulator):
-        return accumulator
-
-
-if __name__ == '__main__':
-
-    from klepto.archives import dir_archive
-    from processor.default_accumulators import desired_output, add_processes_to_output, dataset_axis, pt_axis, eta_axis
-
-    from Tools.helpers import get_samples
-    from Tools.config_helpers import redirector_ucsd, redirector_fnal
-    from Tools.nano_mapping import make_fileset
-
-    overwrite = True
-    
-    # load the config and the cache
-    cfg = loadConfig()
-    
-    cacheName = 'nano_analysis'
-    cache = dir_archive(os.path.join(os.path.expandvars(cfg['caches']['base']), cacheName), serialized=True)
-    histograms = sorted(list(desired_output.keys()))
-    
-    year = 2018
-    
-    samples = get_samples()
-
-    fileset = make_fileset(['QCD'], samples, redirector=redirector_ucsd, small=True)
-    
-    meta = get_sample_meta(fileset, samples)
-
-    add_processes_to_output(fileset, desired_output)
-    
-    desired_output.update({
-        "single_mu_fakeable": hist.Hist("Counts", dataset_axis, pt_axis, eta_axis),
-        "single_mu": hist.Hist("Counts", dataset_axis, pt_axis, eta_axis)
-    })
-
-    exe_args = {
-        'workers': 16,
-        'function_args': {'flatten': False},
-        "schema": NanoAODSchema,
-        "skipbadfiles": True,
-    }
-    exe = processor.futures_executor
-    
-    if not overwrite:
-        cache.load()
-    
-    if cfg == cache.get('cfg') and histograms == cache.get('histograms') and cache.get('simple_output'):
-        output = cache.get('simple_output')
-    
-    else:
-        print ("I'm running now")
-        
-        output = processor.run_uproot_job(
-            fileset,
-            "Events",
-            nano_analysis(year=year, variations=[], accumulator=desired_output),
-            exe,
-            exe_args,
-            chunksize=250000,
-        )
-        
-        cache['fileset']        = fileset
-        cache['cfg']            = cfg
-        cache['histograms']     = histograms
-        cache['simple_output']  = output
-        cache.dump()
