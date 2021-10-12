@@ -1,20 +1,9 @@
 import awkward as ak
 
 from coffea import processor, hist
-from coffea.nanoevents import NanoEventsFactory, NanoAODSchema
-from coffea.analysis_tools import Weights, PackedSelection
-
 import numpy as np
 import pandas as pd
 from yahist import Hist1D, Hist2D
-
-# this is all very bad practice
-from Tools.basic_objects import *
-from Tools.cutflow import *
-from Tools.config_helpers import *
-from Tools.triggers import *
-from Tools.btag_scalefactors import *
-from Tools.lepton_scalefactors import *
 from Tools.helpers import mt
 from Tools.fake_rate import fake_rate
 from Tools.SS_selection import SS_selection
@@ -24,8 +13,6 @@ import uproot
 import glob
 from sklearn.model_selection import train_test_split, RandomizedSearchCV
 import xgboost as xgb
-import pandas as pd
-import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import xgboost as xgb
@@ -42,14 +29,7 @@ import time
 from yahist import Hist1D
 
 import Tools.objects
-#from Tools.nano_mapping import make_fileset, nano_mapping
-from processor.meta_processor import get_sample_meta
-from plots.helpers import makePlot, scale_and_merge
 from sklearn.metrics import auc, roc_auc_score, roc_curve
-
-from klepto.archives import dir_archive
-from processor.default_accumulators import desired_output, add_processes_to_output
-import production.weights
 import postProcessing.makeCards
 import postProcessing.datacard_comparison.compare_datacards as compare_datacards
 
@@ -276,7 +256,7 @@ def gen_BDT(signal_name, param, num_trees, output_dir, booster_name="", data_tra
         data_train = pd.read_csv(output_dir + "data_train.csv")
         data_test = pd.read_csv(output_dir + "data_test.csv")
         
-    assert (data_train != None and data_test != None)
+    assert (type(data_train) != type(None) and type(data_test) != type(None))
     feature_names = train_features#data_train.columns[:-2]  #full_data
     train_weights = data_train.Weight
     test_weights = data_test.Weight
@@ -516,9 +496,11 @@ def process_file(fname, base_dir, BDT_features, version, year):
 
 
 class BDT:
-    def __init__(self, in_base_dir, in_files=[], out_base_dir="/home/users/cmcmahon/public_html/BDT", label="tmp", year="all", booster=None, booster_label="", booster_params=None, train_predictions=None, test_predictions=None, BDT_features=BDT_features, pd_baby=False, pd_sig="HCT"):
+    def __init__(self, in_base_dir, in_files=[], out_base_dir="/home/users/cmcmahon/public_html/BDT", label="tmp", year="all", booster=None, booster_label="", booster_params=None, train_predictions=None, test_predictions=None, BDT_features=BDT_features, pd_baby=False, pd_sig="HCT", train_files=None, test_files=None):
         self.in_base_dir = in_base_dir #"/home/users/cmcmahon/fcnc/ana/analysis/helpers/BDT/babies/2018"
         self.out_base_dir = out_base_dir #/home/users/cmcmahon/public_html/BDT
+        self.train_files = train_files
+        self.test_files = test_files
         self.in_files = in_files
         self.label = label
         self.year = year
@@ -531,8 +513,26 @@ class BDT:
         self.pd_baby = pd_baby
         self.pd_sig = pd_sig
         self.num_trees = 10
-        self.signal, self.background, self.full_data = self.__get_signal_background__(pd_baby, in_base_dir, pd_sig)
-        self.train_data, self.test_data = self.__train_test_split__()
+        if (type(train_files) != type(None) and (type(test_files) != type(None))): #if we specify a directory for training/testing datasets, don't split the data further
+            train_baby_dir = [self.in_base_dir + f for f in train_files]
+            train_sig, train_back, train_full = self.load_SR_BR_from_babies(train_baby_dir)
+            test_baby_dir = [self.in_base_dir + f for f in test_files]
+            test_sig, test_back, test_full = self.load_SR_BR_from_babies(test_baby_dir)
+            train_full['Label'] = train_full.Label.astype('category')
+            test_full['Label'] = test_full.Label.astype('category')
+            #breakpoint()
+            self.signal = pd.concat([train_sig, test_sig], axis=0)
+            self.background = pd.concat([train_back, test_back], axis=0)
+            self.full_data = pd.concat([self.signal, self.background], axis=0)
+            self.signal['Label'] = self.signal.Label.astype('category')
+            self.background['Label'] = self.background.Label.astype('category')
+            self.full_data['Label'] = self.full_data.Label.astype('category')
+            eq = self.equalize_yields(train_full, test_full, verbose=True)
+            self.train_data = eq[0]
+            self.test_data  = eq[1]
+        else:
+            self.signal, self.background, self.full_data = self.__get_signal_background__(pd_baby, in_base_dir, pd_sig)
+            self.train_data, self.test_data = self.__train_test_split__()
         self.evals_result = None
         self.train_predictions = None
         self.test_predictions = None
@@ -656,6 +656,7 @@ class BDT:
         self.train_predictions = self.booster.predict(self.train_Dmatrix)
         
     def gen_BDT(self, flag_load=False, verbose=False, flag_save_booster=True):
+        #breakpoint()
         output_dir = "{0}/{1}/{2}/".format(self.out_base_dir, self.label, self.booster_label)
         param = self.booster_params.copy()
         if verbose:
@@ -666,8 +667,8 @@ class BDT:
         param = list(param.items()) + [('eval_metric', 'logloss')] + [('eval_metric', 'rmse')]
         if verbose:
             print(output_dir)
-        booster, train, test, evals_result = gen_BDT(self.label, self.train_data, self.test_data, param, self.num_trees, 
-                                                    output_dir, booster_name=self.label, flag_load=flag_load, verbose=False, flag_save_booster=flag_save_booster)
+        booster, train, test, evals_result = gen_BDT(self.label, param, self.num_trees, output_dir, booster_name=self.label, data_train=self.train_data,
+                                                     data_test=self.test_data, flag_load=flag_load, verbose=False, flag_save_booster=flag_save_booster)
         self.booster = booster
         self.train_Dmatrix = train
         self.test_Dmatrix = test
@@ -1232,7 +1233,7 @@ class BDT:
                 JES_down_cd = self.make_category_dict(JES_dirs[1], "HCT", background="all", data_driven=data_driven, from_pandas=from_pandas, systematics=systematics, flag_store_dict=False)
         elif signal_name == "HUT":
             cat_dict = self.make_category_dict(directories, "HUT", background="all", data_driven=data_driven, from_pandas=from_pandas, systematics=systematics, flag_store_dict=False)
-            if len(JES_dirs)==2:
+            if (len(JES_dirs)==2 and systematics):
                 JES_up_cd = self.make_category_dict(JES_dirs[0], "HUT", background="all", data_driven=data_driven, from_pandas=from_pandas, systematics=systematics, flag_store_dict=False)
                 JES_down_cd = self.make_category_dict(JES_dirs[1], "HUT", background="all", data_driven=data_driven, from_pandas=from_pandas, systematics=systematics, flag_store_dict=False)
         out_dir = "{0}/{1}/datacards/".format(self.out_base_dir, self.label)
