@@ -243,7 +243,7 @@ def BDT_train_test_split(full_data, verbose=True):
         
     return data_train, data_test
 
-def gen_BDT(signal_name, param, num_trees, output_dir, booster_name="", data_train=None, data_test=None, flag_load=False, verbose=True, flag_save_booster=True):
+def gen_BDT(signal_name, param, num_trees, output_dir, bdt_features, booster_name="", data_train=None, data_test=None, flag_load=False, verbose=True, flag_save_booster=True):
     if booster_name == "":
         booster_path = output_dir + "booster_{}.model".format(signal_name)
     else:
@@ -255,9 +255,12 @@ def gen_BDT(signal_name, param, num_trees, output_dir, booster_name="", data_tra
         booster.load_model(booster_path)  # load data
         data_train = pd.read_csv(output_dir + "data_train.csv")
         data_test = pd.read_csv(output_dir + "data_test.csv")
+        data_train['Label'] = data_train.Label.astype('category')
+        data_test['Label'] = data_test.Label.astype('category')
         
     assert (type(data_train) != type(None) and type(data_test) != type(None))
-    feature_names = train_features#data_train.columns[:-2]  #full_data
+    feature_names = bdt_features.copy()
+    feature_names.pop(-1)
     train_weights = data_train.Weight
     test_weights = data_test.Weight
     # we skip the first and last two columns because they are the ID, weight, and label
@@ -289,10 +292,11 @@ def gen_BDT(signal_name, param, num_trees, output_dir, booster_name="", data_tra
 
     return booster, train, test, evals_result
 
-def optimize_BDT_params(data_train, n_iter=20, num_folds=3, param_grid={}):
+def optimize_BDT_params(data_train, bdt_features, n_iter=20, num_folds=3, param_grid={}):
     y_train = data_train.Label.cat.codes
-    feature_names = train_features#data_train.columns[1:-2] 
-    x_train = data_train[feature_names]
+    feature_names = bdt_features.copy()
+    feature_names.pop(-1)
+    x_train = data_train[feature_names]atrix
     clf_xgb = xgb.XGBClassifier(objective = 'binary:logistic', eval_metric="logloss", use_label_encoder=False)
     if len(param_grid.keys())==0:
         param_grid = {
@@ -335,7 +339,7 @@ def make_dmatrix(df, feature_names=None):
         feature_names = feature_names.copy()
         feature_names.pop(-1)
     df["Label"] = df.Label.astype("category")
-    return xgb.DMatrix(data=df[feature_names],label=df.Label.cat.codes, missing=-999.0,feature_names=feature_names)
+    return xgb.DMatrix(data=df[feature_names],label=df.Label.cat.codes, missing=-999.0)#feature_names=feature_names)
 
 def get_s_b_ratio(s_hist, b_hist):
     tot_hist = s_hist + b_hist
@@ -636,7 +640,7 @@ class BDT:
         else:
             self.booster_label = label
         output_dir = "{0}/{1}/{2}/".format(self.out_base_dir, self.label, self.booster_label)
-        self.booster_params = optimize_BDT_params(self.train_data)
+        self.booster_params = optimize_BDT_params(self.train_data, self.BDT_features)
         os.makedirs(output_dir, exist_ok=True)
         os.makedirs(output_dir + "histograms", exist_ok=True)
         pickle.dump(self.booster_params, open(output_dir+"params.p", "wb"))
@@ -667,7 +671,7 @@ class BDT:
         param = list(param.items()) + [('eval_metric', 'logloss')] + [('eval_metric', 'rmse')]
         if verbose:
             print(output_dir)
-        booster, train, test, evals_result = gen_BDT(self.label, param, self.num_trees, output_dir, booster_name=self.label, data_train=self.train_data,
+        booster, train, test, evals_result = gen_BDT(self.label, param, self.num_trees, output_dir, self.BDT_features, booster_name=self.label, data_train=self.train_data,
                                                      data_test=self.test_data, flag_load=flag_load, verbose=False, flag_save_booster=flag_save_booster)
         self.booster = booster
         self.train_Dmatrix = train
@@ -1066,7 +1070,8 @@ class BDT:
         BDT_fakes = self.category_dict["fakes"]["data"]
         BDT_flips = self.category_dict["flips"]["data"]
         BDT_rares = self.category_dict["rares"]["data"]
-        feature_names = train_features#BDT_fakes.columns[1:-2]
+        feature_names = self.BDT_features.copy()
+        feature_names.pop(-1)#BDT_fakes.columns[1:-2]
         BDT_fakes['Label'] = BDT_fakes.Label.astype('category')
         BDT_flips['Label'] = BDT_flips.Label.astype('category')
         BDT_rares['Label'] = BDT_rares.Label.astype('category')
@@ -1117,9 +1122,10 @@ class BDT:
         plt.close()
         
     def plot_datacard_bins(self, cat_dict, sig_pred, fakes_pred, flips_pred, rares_pred, bins, year):
-        out_dir = "{0}/{1}/{2}/".format(self.out_base_dir, self.label, self.booster_label)
+        out_dir = "{0}/{1}/{2}/datacard_plots/".format(self.out_base_dir, self.label, self.booster_label)
+        os.makedirs(out_dir, exist_ok=True)
         sig_weight = np.array(cat_dict["signal"]["data"].Weight)
-        plt.figure("dc_categories", figsize=(7,7))
+        plt.figure("dc_categories_{}".format(year), figsize=(7,7))
         plt.hist(fakes_pred,bins=bins,histtype='step',color='#d7191c',label='fakes', weights=cat_dict["fakes"]["data"].Weight)
         plt.hist(flips_pred,bins=bins,histtype='step',color='#2c7bb6',label='flips', weights=cat_dict["flips"]["data"].Weight)
         plt.hist(rares_pred,bins=bins,histtype='step',color='#fdae61',label='rares', weights=cat_dict["rares"]["data"].Weight)
@@ -1129,6 +1135,27 @@ class BDT:
         plt.xlabel("BDT Score (after QT)")
         plt.savefig(out_dir + "DC_bins_{}.pdf".format(year))
         plt.savefig(out_dir + "DC_bins_{}.png".format(year))
+        plt.close()
+        
+        plt.figure("fakes_stats_{}".format(year), figsize=(7,7))
+        fakes_hist = Hist1D(fakes_pred, bins=bins)
+        #plt.hist(fakes_pred,bins=bins,histtype='step',color='#d7191c',label='fakes')
+        fakes_hist.plot(ax=plt.gca(), errors=True, color = '#d7191c')
+        plt.title('Fakes CR Stats ({})'.format(year))
+        plt.xlabel("BDT Score (after QT)")
+        plt.ylabel("Number of Events")
+        plt.savefig(out_dir + "Fakes_CRStats_{}.pdf".format(year))
+        plt.savefig(out_dir + "Fakes_CRStats_{}.png".format(year))
+        plt.close()
+        
+        plt.figure("flips_stats_{}".format(year), figsize=(7,7))
+        flips_hist = Hist1D(flips_pred, bins=bins)
+        flips_hist.plot(ax=plt.gca(), errors=True, color = '#2c7bb6')
+        plt.title('Flips CR Stats ({})'.format(year))
+        plt.ylabel("Number of Events")
+        plt.xlabel("BDT Score (after QT)")
+        plt.savefig(out_dir + "Flips_CRStats_{}.pdf".format(year))
+        plt.savefig(out_dir + "Flips_CRStats_{}.png".format(year))
         plt.close()
         
     def get_bin_yield(self, category, bins, bin_idx, cat_dict, quantile_transformer=None):
@@ -1213,14 +1240,14 @@ class BDT:
         #booster = xgb.Booster() # init model
         #self.booster.load_model(booster_path) # load data
         test_df = pd.read_csv(test_file)
-        results = self.booster.predict(BDT_analysis.make_dmatrix(test_df, BDT_features))
+        results = self.booster.predict(make_dmatrix(test_df, self.BDT_features))
         test_df["result"] = results
         test_df = test_df.drop(labels=["Weight", "Label", "Category"], axis=1)
         test_df.to_csv("{}/python_test_results_{}.csv".format(output_dir, self.label), index=False)
         print(results)
     
     def gen_datacard(self, signal_name, year, directories, quantile_transform=True, data_driven=False, plot=True, BDT_bins=np.linspace(0, 1, 21),
-                     flag_tmp_directory=False, dir_label="tmp", from_pandas=False, systematics=False, JES_dirs=(), flag_plot=False):
+                     flag_tmp_directory=False, dir_label="tmp", from_pandas=False, systematics=False, JES_dirs=()):
         yield_dict = {}
         if systematics:
             systematics_yields = {}
@@ -1244,7 +1271,8 @@ class BDT:
         BDT_flips = cat_dict["flips"]["data"]
         BDT_rares = cat_dict["rares"]["data"]
         #BDT_bins = np.linspace(0, 1, 20)
-        feature_names = train_features#BDT_fakes.columns[:-2]  #full_data
+        feature_names = self.BDT_features.copy()
+        feature_names.pop(-1)
         fakes_weights = BDT_fakes.Weight 
         flips_weights = BDT_flips.Weight
         rares_weights = BDT_rares.Weight 
@@ -1301,7 +1329,7 @@ class BDT:
             label = "QT"
         else:
             label = ""
-        postProcessing.makeCards.make_BDT_datacard(yield_dict, BDT_bins, signal_name, output_path, label, year, systematics_yields=systematics_yields, flag_plot=flag_plot)
+        postProcessing.makeCards.make_BDT_datacard(yield_dict, BDT_bins, signal_name, output_path, label, year, systematics_yields=systematics_yields, flag_plot=plot)
         
     def plot_response(self, plot=True, savefig=False, label="all"):
         #plot the BDT response (correlation of BDT score with feature variables)

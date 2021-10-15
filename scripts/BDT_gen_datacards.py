@@ -33,36 +33,17 @@ all_files_dd = (["2016/data_driven/" + f for f in dd_files] + ["2017/data_driven
 HCT_files_dd = (["2016/data_driven/" + f for f in HCT_cat_dd] + ["2017/data_driven/" + f for f in HCT_cat_dd] + ["2018/data_driven/" + f for f in HCT_cat_dd])
 HUT_files_dd = (["2016/data_driven/" + f for f in HUT_cat_dd] + ["2017/data_driven/" + f for f in HUT_cat_dd] + ["2018/data_driven/" + f for f in HUT_cat_dd])
 
-input_baby_dir   = "/home/users/cmcmahon/fcnc/ana/analysis/helpers/BDT/single_top_babies/" #change this if the babies change
+input_baby_dir   = "/home/users/cmcmahon/fcnc/ana/analysis/helpers/BDT/babies/ctag/" #change this if the babies change
 base_output_dir  = "/home/users/cmcmahon/public_html/BDT"
 
 #all_categories   = BDT_analysis.BDT(input_baby_dir, all_files, base_output_dir, label="all_categories", year="all")
-HCT              = BDT_analysis.BDT(input_baby_dir, HCT_files, base_output_dir, label="HCT", year="all")
-HUT              = BDT_analysis.BDT(input_baby_dir, HUT_files, base_output_dir, label="HUT", year="all")
+HCT              = BDT_analysis.BDT(input_baby_dir, HCT_files, base_output_dir, label="HCT_ctag", year="all")
+HUT              = BDT_analysis.BDT(input_baby_dir, HUT_files, base_output_dir, label="HUT_ctag", year="all")
 
 every_BDT = [HCT, HUT]
-
-# for bdt in every_BDT:
-#     bdt.gen_BDT_and_plot(load_BDT=True, optimize=False, retrain=True)
+for bdt in every_BDT:
+    bdt.gen_BDT_and_plot(load_BDT=True, optimize=True, retrain=True, plot=True)
     
-#tth_input_baby_dir   = "/home/users/ewallace/public_html/FCNC/BDT/FCNC_BDT_input_2018_v2.h5"
-tth_input_baby_dir = "/home/users/ewallace/public_html/FCNC/BDT/FCNC_BDT_input_2018_v3.h5"
-HCT_TTH          = BDT_analysis.BDT(tth_input_baby_dir, out_base_dir=base_output_dir, label="TTH_ID_HCT_v3", pd_baby=True, pd_sig="HCT")
-HUT_TTH          = BDT_analysis.BDT(tth_input_baby_dir, out_base_dir=base_output_dir, label="TTH_ID_HUT_v3", pd_baby=True, pd_sig="HUT")
-#old_SS_baby_dir =  "/home/users/ewallace/public_html/FCNC/BDT/FCNC_BDT_input_2018_currentID.h5"
-old_SS_baby_dir = "/home/users/ewallace/public_html/FCNC/BDT/FCNC_BDT_input_2018_currentID_v3.h5"
-HCT_old_SS = BDT_analysis.BDT(old_SS_baby_dir, out_base_dir=base_output_dir, label="currentID_HCT_v3", pd_baby=True, pd_sig="HCT")
-HUT_old_SS = BDT_analysis.BDT(old_SS_baby_dir, out_base_dir=base_output_dir, label="currentID_HUT_v3", pd_baby=True, pd_sig="HUT")
-# old_BDT = [HCT_old_SS, HUT_old_SS]
-# for bdt in old_BDT:
-#     bdt.gen_BDT_and_plot(load_BDT=True, optimize=False, retrain=False, plot=False)
-every_TTH = [HCT_TTH, HUT_TTH, HCT_old_SS, HUT_old_SS]
-for bdt in every_TTH:
-    bdt.gen_BDT_and_plot(load_BDT=True, optimize=False, retrain=False, plot=False)
-    
-retrain_TTH = [HUT_old_SS]
-for bdt in retrain_TTH:
-    bdt.gen_BDT_and_plot(load_BDT=False, optimize=True, retrain=True, plot=True)
 quantile_dict = {
     '0.025': '-2sig',
     '0.16': '-1sig',
@@ -166,58 +147,3 @@ class combine_result:
                 print("{0}\tnum_bins={1}\texpected limit={2:.5f}\tQT={3}".format(self.sig_type, bin_spacing, res["expected"], QT))
             return res
         
-flag_gen_datacards = False
-if flag_gen_datacards:
-    #data_dir = ["/home/users/ewallace/public_html/FCNC/BDT/FCNC_BDT_input_2018_v2.h5"]
-    for bdt in every_TTH:
-        if "TTH" in bdt.label:
-            data_dir = [tth_input_baby_dir]
-        elif "currentID" in bdt.label:
-            data_dir = [old_SS_baby_dir]
-        else:
-            raise NameError
-        bdt.gen_datacards(data_dir, 2018, quantile_transform=True, data_driven=False, plot=True, from_pandas=True, systematics=False)
-
-for bdt in every_TTH:
-    if (bdt.label == "TTH_ID_HCT_v3") or (bdt.label=="currentID_HCT_v3"):
-        sl = "HCT"
-    elif (bdt.label == "TTH_ID_HUT_v3") or (bdt.label=="currentID_HUT_v3"):
-        sl = "HUT"
-    if "TTH" in bdt.label:
-        data_dir = tth_input_baby_dir
-    elif "currentID" in bdt.label:
-        data_dir = old_SS_baby_dir
-    else:
-        raise NameError
-    print(data_dir)
-    print(sl)
-    bdt_result = combine_result(bdt, sl, base_data_dir=data_dir, from_pandas=True)
-    tmp_res = bdt_result.get_limits(20, QT=True, verbose=False)["expected"]
-    print("{}\texpected={}".format(bdt.label, tmp_res))
-
-# hct_result = combine_result(HCT, "HCT")
-# hut_result = combine_result(HUT, "HUT")
-
-# for b in num_bins:
-#     hct_result.get_limits(b, QT=True, verbose=True)
-#     hut_result.get_limits(b, QT=True, verbose=True)
-#     hct_result.get_limits(b, QT=False, verbose=True)
-#     hut_result.get_limits(b, QT=False, verbose=True)
-# flag_gen_datacards = False
-# if flag_gen_datacards:
-#     for y in [2016, 2017, 2018]:
-#         data_dir = ["/home/users/cmcmahon/fcnc/ana/analysis/helpers/BDT/single_top_babies/{}/data_driven/".format(y)]
-#         for bdt in every_BDT:
-#             bdt.gen_datacards(data_dir, y, quantile_transform=True, data_driven=True)
-    
-# flag_gen_categories = True
-# if flag_gen_categories:
-#     all_directories = ["/home/users/cmcmahon/fcnc/ana/analysis/helpers/BDT/single_top_babies" + f for f in ["/2016/MC/", "/2017/MC/", "/2018/MC/"]]
-#     all_directories_data_driven = ["/home/users/cmcmahon/fcnc/ana/analysis/helpers/BDT/single_top_babies" + f for f in ["/2016/data_driven/", "/2017/data_driven/", "/2018/data_driven/"]]
-#     #run this later, compare data driven vs mc
-#     for bdt in [HCT, HUT]:#, all_categories]:
-#     #HCT.fill_dicts(all_directories_data_driven, data_driven=True)
-#         bdt.fill_dicts(all_directories, data_driven=False)
-#         bdt.plot_categories(plot=True, savefig=True)
-#         for l in ["all", "signal", "fakes", "flips", "rares"]:
-#             bdt.plot_response(plot=True, savefig=True, label=l)
