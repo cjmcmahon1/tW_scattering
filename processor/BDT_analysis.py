@@ -674,8 +674,9 @@ class BDT:
         self.booster_params = pickle.load(open(output_dir + "params.p", "rb"))
     
     def get_predictions(self):
-        self.test_predictions = self.booster.predict(make_dmatrix(self.test_Dmatrix))
-        self.train_predictions = self.booster.predict(make_dmatrix(self.train_Dmatrix))
+        return
+        #self.test_predictions = self.booster.predict(self.test_Dmatrix)
+        #self.train_predictions = self.booster.predict(self.train_Dmatrix)
         
     def gen_BDT(self, flag_load=False, verbose=False, flag_save_booster=True):
         #breakpoint()
