@@ -1,13 +1,13 @@
 import awkward as ak
 
-from coffea import processor, hist
+#from coffea import processor, hist
 import numpy as np
 import pandas as pd
 from yahist import Hist1D, Hist2D
-from Tools.helpers import mt
-from Tools.fake_rate import fake_rate
-from Tools.SS_selection import SS_selection
-import production.weights
+#from Tools.helpers import mt
+#from Tools.fake_rate import fake_rate
+#from Tools.SS_selection import SS_selection
+#import production.weights
 
 import uproot
 import glob
@@ -264,10 +264,17 @@ def gen_BDT(signal_name, param, num_trees, output_dir, bdt_features, booster_nam
     train_weights = data_train.Weight
     test_weights = data_test.Weight
     # we skip the first and last two columns because they are the ID, weight, and label
-    train = xgb.DMatrix(data=data_train[feature_names],label=data_train.Label.cat.codes,
-                        missing=-999.0,feature_names=feature_names, weight=np.abs(train_weights))
-    test = xgb.DMatrix(data=data_test[feature_names],label=data_test.Label.cat.codes,
-                       missing=-999.0,feature_names=feature_names, weight=np.abs(test_weights))
+#     train = xgb.DMatrix(data=data_train[feature_names],label=data_train.Label.cat.codes,
+#                         missing=-999.0,feature_names=feature_names, weight=np.abs(train_weights))
+    train = data_train[feature_names].to_numpy()
+    train_labels = data_train.Label.cat.codes
+#     test = xgb.DMatrix(data=data_test[feature_names],label=data_test.Label.cat.codes,
+#                        missing=-999.0,feature_names=feature_names, weight=np.abs(test_weights))
+    test = data_test[feature_names].to_numpy()
+    print("train =", train)
+    test_labels = data_test.Label.cat.codes
+    #breakpoint()
+    classifier = xgb.XGBClassifier(booster="gbtree", n_estimators=num_trees, **dict(param))
     evals_result = {}
 
     if verbose:
@@ -280,7 +287,11 @@ def gen_BDT(signal_name, param, num_trees, output_dir, bdt_features, booster_nam
         if verbose:
             print("Training new model...")
         evals = [(train, "train"), (test,"test")]
-        booster = xgb.train(param,train,num_boost_round=num_trees, evals=evals, evals_result=evals_result, verbose_eval=False, early_stopping_rounds=min(3,(num_trees//10)))
+        classifier.fit(train, train_labels)
+        booster = classifier.get_booster()
+        classifier.get_booster().dump_model("/home/users/cmcmahon/public_html/test_booster_dump_np.model")
+#         ROOT.TMVA.Experimental.SaveXGBoost(bdt, "myBDT", "tmva101.root")
+        #booster = xgb.train(param,train,num_boost_round=num_trees, evals=evals, evals_result=evals_result, verbose_eval=False, early_stopping_rounds=min(3,(num_trees//10)))
         if verbose:
             print(booster.eval(test))
 
@@ -289,14 +300,15 @@ def gen_BDT(signal_name, param, num_trees, output_dir, bdt_features, booster_nam
         booster.save_model(booster_path)
         data_train.to_csv(output_dir + "data_train.csv")
         data_test.to_csv(output_dir + "data_test.csv")
+        pickle.dump(classifier, open(output_dir + "classifier.p", "wb"))
 
-    return booster, train, test, evals_result
+    return booster, train, test, evals_result, classifier
 
 def optimize_BDT_params(data_train, bdt_features, n_iter=20, num_folds=3, param_grid={}):
     y_train = data_train.Label.cat.codes
     feature_names = bdt_features.copy()
     feature_names.pop(-1)
-    x_train = data_train[feature_names]atrix
+    x_train = data_train[feature_names]
     clf_xgb = xgb.XGBClassifier(objective = 'binary:logistic', eval_metric="logloss", use_label_encoder=False)
     if len(param_grid.keys())==0:
         param_grid = {
@@ -383,120 +395,120 @@ def gen_hist(data_test, label, out_dir, savefig=False, plot=False):
     else:
         plt.close()
         
-def get_SR_BR(signal_name, base_dir, version, year, BDT_features, background_category="none", flag_match_yields=True, gen_signal=True, gen_background=True):
-    desired_output.update({"BDT_df": processor.column_accumulator(np.zeros(shape=(0,len(BDT_features)+1)))})
-    if signal_name == "HCT":
-        signal_files = glob.glob(base_dir + "*hct*.root")
-    elif signal_name == "HUT":
-        signal_files = glob.glob(base_dir + "*hut*.root")
-    elif signal_name == "combined_HCT_HUT":
-        signal_files = glob.glob(base_dir + "*hct*.root") + glob.glob(base_dir + "*hut*.root")
+# def get_SR_BR(signal_name, base_dir, version, year, BDT_features, background_category="none", flag_match_yields=True, gen_signal=True, gen_background=True):
+#     desired_output.update({"BDT_df": processor.column_accumulator(np.zeros(shape=(0,len(BDT_features)+1)))})
+#     if signal_name == "HCT":
+#         signal_files = glob.glob(base_dir + "*hct*.root")
+#     elif signal_name == "HUT":
+#         signal_files = glob.glob(base_dir + "*hut*.root")
+#     elif signal_name == "combined_HCT_HUT":
+#         signal_files = glob.glob(base_dir + "*hct*.root") + glob.glob(base_dir + "*hut*.root")
         
-    if background_category=="none":
-        remove_files = glob.glob(base_dir + "*hut*.root") + glob.glob(base_dir + "*hct*.root") + glob.glob(base_dir + "*data.root") + glob.glob(base_dir + "tt[0-9]lep.root")
-        background_files = glob.glob(base_dir + "*.root")
-        [background_files.remove(r) for r in remove_files]
-    elif background_category=="fakes":
-        background_files = [base_dir + "ttjets.root", base_dir + "wjets.root", base_dir + "ttg_1lep.root"]
-    elif background_category=="flips":
-        background_files = [base_dir + f for f in ["dyjets_m10-50.root", "dyjets_m50.root", "zg.root", "tw_dilep.root"]]#, "ww.root"]]
-    elif background_category=="rares":
-        remove_files = [base_dir + f for f in ["dyjets_m10-50.root", "dyjets_m50.root", "ww.root", "zg.root", "ttjets.root", "wjets.root", "ttg_1lep.root", "tw_dilep.root"]]
-        remove_files += glob.glob(base_dir + "*hut*.root") + glob.glob(base_dir + "*hct*.root") + glob.glob(base_dir + "*data.root") + glob.glob(base_dir + "tt[0-9]lep.root")
-        background_files = glob.glob(base_dir + "*.root")
-        [background_files.remove(r) for r in remove_files]
-    #print(background_files)
-    concat_file = []
-    for file in background_files:
-        concat_file.append(file[file.rfind('/')+1:file.rfind('.')])
-    print(concat_file)
-    signal_fileset = {}
-    for s in signal_files:
-        process_name = s[(s.rfind('/')+1):(s.rfind('.'))]
-        signal_fileset[process_name] = [s]
-    background_fileset = {}    
-    for b in background_files:
-        process_name = b[(b.rfind('/')+1):(b.rfind('.'))]
-        background_fileset[process_name] = [b]
+#     if background_category=="none":
+#         remove_files = glob.glob(base_dir + "*hut*.root") + glob.glob(base_dir + "*hct*.root") + glob.glob(base_dir + "*data.root") + glob.glob(base_dir + "tt[0-9]lep.root")
+#         background_files = glob.glob(base_dir + "*.root")
+#         [background_files.remove(r) for r in remove_files]
+#     elif background_category=="fakes":
+#         background_files = [base_dir + "ttjets.root", base_dir + "wjets.root", base_dir + "ttg_1lep.root"]
+#     elif background_category=="flips":
+#         background_files = [base_dir + f for f in ["dyjets_m10-50.root", "dyjets_m50.root", "zg.root", "tw_dilep.root"]]#, "ww.root"]]
+#     elif background_category=="rares":
+#         remove_files = [base_dir + f for f in ["dyjets_m10-50.root", "dyjets_m50.root", "ww.root", "zg.root", "ttjets.root", "wjets.root", "ttg_1lep.root", "tw_dilep.root"]]
+#         remove_files += glob.glob(base_dir + "*hut*.root") + glob.glob(base_dir + "*hct*.root") + glob.glob(base_dir + "*data.root") + glob.glob(base_dir + "tt[0-9]lep.root")
+#         background_files = glob.glob(base_dir + "*.root")
+#         [background_files.remove(r) for r in remove_files]
+#     #print(background_files)
+#     concat_file = []
+#     for file in background_files:
+#         concat_file.append(file[file.rfind('/')+1:file.rfind('.')])
+#     print(concat_file)
+#     signal_fileset = {}
+#     for s in signal_files:
+#         process_name = s[(s.rfind('/')+1):(s.rfind('.'))]
+#         signal_fileset[process_name] = [s]
+#     background_fileset = {}    
+#     for b in background_files:
+#         process_name = b[(b.rfind('/')+1):(b.rfind('.'))]
+#         background_fileset[process_name] = [b]
 
-    exe_args = {
-        'workers': 16,
-        'function_args': {'flatten': False},
-        "schema": NanoAODSchema,
-        "skipbadfiles": True,
-    }
-    exe = processor.futures_executor
-    with warnings.catch_warnings(): #Ignoring all RuntimeWarnings (there are a lot)
-        warnings.simplefilter("ignore", category=RuntimeWarning)
-        if gen_signal:
-            signal_output = processor.run_uproot_job(
-                signal_fileset,
-                "Events",
-                nano_analysis(year=year, variations=[], accumulator=desired_output, BDT_features=BDT_features, version=version),
-                exe,
-                exe_args,
-                chunksize=250000,
-            )
-            signal_BDT_params = pd.DataFrame(data=signal_output["BDT_df"].value, columns=(["event"]+BDT_features))
-            signal_BDT_params["Label"] = "s"
-        else:
-            signal_BDT_params = None
+#     exe_args = {
+#         'workers': 16,
+#         'function_args': {'flatten': False},
+#         "schema": NanoAODSchema,
+#         "skipbadfiles": True,
+#     }
+#     exe = processor.futures_executor
+#     with warnings.catch_warnings(): #Ignoring all RuntimeWarnings (there are a lot)
+#         warnings.simplefilter("ignore", category=RuntimeWarning)
+#         if gen_signal:
+#             signal_output = processor.run_uproot_job(
+#                 signal_fileset,
+#                 "Events",
+#                 nano_analysis(year=year, variations=[], accumulator=desired_output, BDT_features=BDT_features, version=version),
+#                 exe,
+#                 exe_args,
+#                 chunksize=250000,
+#             )
+#             signal_BDT_params = pd.DataFrame(data=signal_output["BDT_df"].value, columns=(["event"]+BDT_features))
+#             signal_BDT_params["Label"] = "s"
+#         else:
+#             signal_BDT_params = None
             
-        if gen_background:
-            background_output = processor.run_uproot_job(
-                background_fileset,
-                "Events",
-                nano_analysis(year=year, variations=[], accumulator=desired_output, BDT_features=BDT_features, version=version),
-                exe,
-                exe_args,
-                chunksize=250000,
-            )
-            background_BDT_params = pd.DataFrame(data=background_output["BDT_df"].value, columns=(["event"]+BDT_features))
-            background_BDT_params["Label"] = "b"
-            background_BDT_params = sklearn.utils.shuffle(background_BDT_params) #shuffle our background before we cut out a subset of it
-    #background_BDT_params = background_BDT_params[:signal_BDT_params.shape[0]] #make the background only as large as the signal
-        else:
-            background_BDT_params = None
-    if flag_match_yields and gen_signal and gen_background:
-        signal_yield = sum(signal_BDT_params.Weight)
-        background_yield = sum(background_BDT_params.Weight)
-        SR_BR_ratio = signal_yield/background_yield
-        print("signal yield:{}".format(signal_yield))
-        print("background yield:{}".format(background_yield))
-        print("SR/BR yield ratio:{}".format(SR_BR_ratio))
-        signal_BDT_params.Weight = signal_BDT_params.Weight / SR_BR_ratio
-        print("new signal yield:{}".format(sum(signal_BDT_params.Weight)))
-        print("new SR/BR yield ratio:{}".format(sum(signal_BDT_params.Weight) / background_yield))
-    if gen_signal and gen_background:
-        full_data = pd.concat([signal_BDT_params, background_BDT_params], axis=0)
-    else:
-        full_data = None
-    return (signal_BDT_params, background_BDT_params, full_data)
+#         if gen_background:
+#             background_output = processor.run_uproot_job(
+#                 background_fileset,
+#                 "Events",
+#                 nano_analysis(year=year, variations=[], accumulator=desired_output, BDT_features=BDT_features, version=version),
+#                 exe,
+#                 exe_args,
+#                 chunksize=250000,
+#             )
+#             background_BDT_params = pd.DataFrame(data=background_output["BDT_df"].value, columns=(["event"]+BDT_features))
+#             background_BDT_params["Label"] = "b"
+#             background_BDT_params = sklearn.utils.shuffle(background_BDT_params) #shuffle our background before we cut out a subset of it
+#     #background_BDT_params = background_BDT_params[:signal_BDT_params.shape[0]] #make the background only as large as the signal
+#         else:
+#             background_BDT_params = None
+#     if flag_match_yields and gen_signal and gen_background:
+#         signal_yield = sum(signal_BDT_params.Weight)
+#         background_yield = sum(background_BDT_params.Weight)
+#         SR_BR_ratio = signal_yield/background_yield
+#         print("signal yield:{}".format(signal_yield))
+#         print("background yield:{}".format(background_yield))
+#         print("SR/BR yield ratio:{}".format(SR_BR_ratio))
+#         signal_BDT_params.Weight = signal_BDT_params.Weight / SR_BR_ratio
+#         print("new signal yield:{}".format(sum(signal_BDT_params.Weight)))
+#         print("new SR/BR yield ratio:{}".format(sum(signal_BDT_params.Weight) / background_yield))
+#     if gen_signal and gen_background:
+#         full_data = pd.concat([signal_BDT_params, background_BDT_params], axis=0)
+#     else:
+#         full_data = None
+#     return (signal_BDT_params, background_BDT_params, full_data)
 
-def process_file(fname, base_dir, BDT_features, version, year):
-    fileset = {}
-    process_name = fname[(fname.rfind('/')+1):(fname.rfind('.'))]
-    fileset[process_name] = [fname]
-    desired_output.update({"BDT_df": processor.column_accumulator(np.zeros(shape=(0,len(BDT_features)+1)))})
-    exe_args = {
-        'workers': 16,
-        'function_args': {'flatten': False},
-        "schema": NanoAODSchema,
-        "skipbadfiles": True,
-    }
-    exe = processor.futures_executor
-    with warnings.catch_warnings(): #Ignoring all RuntimeWarnings (there are a lot)
-        warnings.simplefilter("ignore", category=RuntimeWarning)
-        tmp_output = processor.run_uproot_job(
-            fileset,
-            "Events",
-            nano_analysis(year=year, variations=[], accumulator=desired_output, BDT_features=BDT_features, version=version),
-            exe,
-            exe_args,
-            chunksize=250000,
-        )
-    tmp_BDT_params = pd.DataFrame(data=tmp_output["BDT_df"].value, columns=(["event"]+BDT_features))
-    return tmp_BDT_params
+# def process_file(fname, base_dir, BDT_features, version, year):
+#     fileset = {}
+#     process_name = fname[(fname.rfind('/')+1):(fname.rfind('.'))]
+#     fileset[process_name] = [fname]
+#     desired_output.update({"BDT_df": processor.column_accumulator(np.zeros(shape=(0,len(BDT_features)+1)))})
+#     exe_args = {
+#         'workers': 16,
+#         'function_args': {'flatten': False},
+#         "schema": NanoAODSchema,
+#         "skipbadfiles": True,
+#     }
+#     exe = processor.futures_executor
+#     with warnings.catch_warnings(): #Ignoring all RuntimeWarnings (there are a lot)
+#         warnings.simplefilter("ignore", category=RuntimeWarning)
+#         tmp_output = processor.run_uproot_job(
+#             fileset,
+#             "Events",
+#             nano_analysis(year=year, variations=[], accumulator=desired_output, BDT_features=BDT_features, version=version),
+#             exe,
+#             exe_args,
+#             chunksize=250000,
+#         )
+#     tmp_BDT_params = pd.DataFrame(data=tmp_output["BDT_df"].value, columns=(["event"]+BDT_features))
+#     return tmp_BDT_params
 
 
 class BDT:
@@ -543,6 +555,7 @@ class BDT:
         self.category_dict = None
         self.HCT_dict = None
         self.HUT_dict = None
+        self.classifier = None
         
     def combine_BDTs(self, other_BDTs, new_label, year="combined"):
         other = BDT(self.in_base_dir, self.in_files, self.out_base_dir, new_label, year=year)
@@ -591,8 +604,13 @@ class BDT:
             process_name = file[(file.rfind('/')+1):(file.rfind('.'))]
             df = pd.DataFrame()
             df_values = tree.arrays()
+            if type(list(df_values.keys())[0]) == type(b''):
+                bits = True
             for feature in self.BDT_features:
-                df[feature] = np.array(df_values[feature])
+                if bits:
+                    df[feature] = np.array(df_values[feature.encode("utf-8")])
+                else:
+                    df[feature] = np.array(df_values[feature])
                 
             if "signal" in process_name:
                 df["Category"] = "signal"
@@ -656,8 +674,8 @@ class BDT:
         self.booster_params = pickle.load(open(output_dir + "params.p", "rb"))
     
     def get_predictions(self):
-        self.test_predictions = self.booster.predict(self.test_Dmatrix)
-        self.train_predictions = self.booster.predict(self.train_Dmatrix)
+        self.test_predictions = self.booster.predict(make_dmatrix(self.test_Dmatrix))
+        self.train_predictions = self.booster.predict(make_dmatrix(self.train_Dmatrix))
         
     def gen_BDT(self, flag_load=False, verbose=False, flag_save_booster=True):
         #breakpoint()
@@ -671,12 +689,13 @@ class BDT:
         param = list(param.items()) + [('eval_metric', 'logloss')] + [('eval_metric', 'rmse')]
         if verbose:
             print(output_dir)
-        booster, train, test, evals_result = gen_BDT(self.label, param, self.num_trees, output_dir, self.BDT_features, booster_name=self.label, data_train=self.train_data,
-                                                     data_test=self.test_data, flag_load=flag_load, verbose=False, flag_save_booster=flag_save_booster)
+        booster, train, test, evals_result, classifier = gen_BDT(self.label, param, self.num_trees, output_dir, self.BDT_features, booster_name=self.label, data_train=self.train_data,
+                                                                 data_test=self.test_data, flag_load=flag_load, verbose=False, flag_save_booster=flag_save_booster)
         self.booster = booster
         self.train_Dmatrix = train
         self.test_Dmatrix = test
         self.evals_result = evals_result
+        self.classifier = classifier
         return self.booster
     
     def plot_ratio(self, region="signal", savefig=False, plot=True, verbose=False):
